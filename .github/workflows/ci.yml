@@ -150,3 +150,18 @@ jobs:
             pkg_add -I rust
           run: |
             cargo test
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build documentation
+        run: cargo doc --no-deps
+
+      - name: Verify package
+        run: cargo package

@@ -1,7 +1,11 @@
 tokio-timerfd
 =============
 
+[![CI](https://github.com/gqf2008/tokio-timerfd/actions/workflows/ci.yml/badge.svg)](https://github.com/gqf2008/tokio-timerfd/actions/workflows/ci.yml)
+
 OS-backed high-resolution timers for Tokio.
+
+This repository is maintained independently at [gqf2008/tokio-timerfd](https://github.com/gqf2008/tokio-timerfd).
 
 | Platform | Backend |
 | --- | --- |

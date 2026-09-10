@@ -118,3 +118,35 @@ jobs:
 
       - name: Check
         run: cargo check --all-targets
+
+  netbsd-runtime:
+    name: NetBSD runtime
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Test on NetBSD
+        uses: vmactions/netbsd-vm@20ee93a005c9fc78743e6e05269f4cb023b87413 # v1.5.0
+        with:
+          usesh: true
+          prepare: |
+            pkgin -y install rust
+          run: |
+            cargo test
+
+  openbsd-runtime:
+    name: OpenBSD runtime
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Test on OpenBSD
+        uses: vmactions/openbsd-vm@86cdc08415d9d0865267e686561e276c52d62530 # v1.4.7
+        with:
+          usesh: true
+          prepare: |
+            pkg_add -I rust
+          run: |
+            cargo test

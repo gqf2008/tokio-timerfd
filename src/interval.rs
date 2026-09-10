@@ -108,7 +108,11 @@ mod tests {
     async fn long_interval_works() {
         let mut interval = Interval::new_interval(Duration::from_millis(20)).unwrap();
 
-        for _ in 0..3 {
+        // The first tick may already be due if the scheduler delays this task
+        // before its first poll. Measure the following periods instead.
+        interval.next().await.unwrap().unwrap();
+
+        for _ in 0..2 {
             let before = Instant::now();
             interval.next().await.unwrap().unwrap();
             let elapsed = before.elapsed();

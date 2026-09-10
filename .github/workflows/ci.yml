@@ -116,8 +116,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.81
 
-      - name: Check
-        run: cargo check --all-targets
+      - name: Test
+        run: cargo test --release
 
   netbsd-runtime:
     name: NetBSD runtime

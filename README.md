@@ -44,8 +44,9 @@ no effect on other platforms.
 | Windows | Runtime tests locally and in CI |
 | macOS | Runtime tests in CI; iOS compile-checked |
 | FreeBSD | Runtime tests in CI |
-| NetBSD | Cross-compile check in CI |
-| OpenBSD / DragonFly BSD | Best effort until runtime coverage exists |
+| NetBSD | Runtime tests in CI |
+| OpenBSD | Runtime tests in CI |
+| DragonFly BSD | Best effort until runtime coverage exists |
 
 The APIs provide higher timer resolution where the operating system supports it,
 but actual wakeup latency remains dependent on scheduling and system load. They

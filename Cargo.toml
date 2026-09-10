@@ -3,13 +3,14 @@ name = "tokio-timerfd"
 version = "0.2.0"
 authors = ["Alexander Polakov <plhk@sdf.org>"]
 edition = "2018"
-description = "timerfd support for tokio"
+rust-version = "1.81"
+description = "OS-backed timers for Tokio"
 license = "MIT"
 documentation = "https://docs.rs/tokio-timerfd"
 repository = "https://github.com/polachok/tokio-timerfd"
 homepage = "https://github.com/polachok/tokio-timerfd"
 readme = "README.md"
-categories = ["asynchronous", "os", "os::unix-apis"]
+categories = ["asynchronous", "os", "os::unix-apis", "os::windows-apis"]
 keywords = ["timerfd", "timers"]
 
 [features]
@@ -17,12 +18,23 @@ boottime = []
 realtime = []
 
 [dependencies]
-tokio = { version = "1.0", features = ["net"] }
-timerfd = "1.0"
 futures-core = "0.3"
-slab = "0.4"
+tokio = { version = "1.0", features = ["net", "time"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+libc = "0.2"
+timerfd = "1.0"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
+
 [dev-dependencies]
-tokio = { version = "1.0", features = ["macros", "test-util"] }
+tokio = { version = "1.0", features = ["macros", "rt", "test-util"] }
 futures = "0.3"
+
+[[bench]]
+name = "timer_latency"
+harness = false

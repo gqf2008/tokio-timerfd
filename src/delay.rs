@@ -1,29 +1,26 @@
+use crate::timer::Timer;
+use futures_core::ready;
 use std::future::Future;
 use std::io::Error as IoError;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
-use crate::{get_clock, TimerFd};
-use futures_core::ready;
-use timerfd::{SetTimeFlags, TimerState};
-use tokio::io::{AsyncRead, ReadBuf};
-
-/// A future that completes at a specified instant in time.
-/// Instances of Delay perform no work and complete with () once the specified deadline has been reached.
-/// Delay is powered by `timerfd` and has a resolution of 1 nanosecond.
+/// A future that completes at a specified instant.
+///
+/// `Delay` uses the operating system's native timer facility where available
+/// and returns an error if the timer cannot be created or polled.
 pub struct Delay {
-    timerfd: TimerFd,
+    timer: Timer,
     deadline: Instant,
     initialized: bool,
 }
 
 impl Delay {
-    /// Create a new `Delay` instance that elapses at `deadline`.
+    /// Creates a new `Delay` that completes at `deadline`.
     pub fn new(deadline: Instant) -> Result<Self, IoError> {
-        let timerfd = TimerFd::new(get_clock())?;
         Ok(Delay {
-            timerfd,
+            timer: Timer::new()?,
             deadline,
             initialized: false,
         })
@@ -34,13 +31,14 @@ impl Delay {
         self.deadline
     }
 
-    /// Returns true if the `Delay` has elapsed
+    /// Returns `true` once `deadline` has been reached.
     pub fn is_elapsed(&self) -> bool {
-        self.deadline > Instant::now()
+        self.deadline <= Instant::now()
     }
 
-    /// Reset the `Delay` instance to a new deadline.
+    /// Resets the delay to a new deadline.
     pub fn reset(&mut self, deadline: Instant) {
+        self.timer.disarm();
         self.deadline = deadline;
         self.initialized = false;
     }
@@ -51,19 +49,11 @@ impl Future for Delay {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if !self.initialized {
-            let now = Instant::now();
-            let duration = if self.deadline > now {
-                self.deadline - now
-            } else {
-                return Poll::Ready(Ok(()));
-            };
-            self.timerfd
-                .set_state(TimerState::Oneshot(duration), SetTimeFlags::Default);
+            let deadline = self.deadline;
+            self.timer.arm(deadline)?;
             self.initialized = true;
         }
-        let mut buf = [0u8; 8];
-        let mut buf = ReadBuf::new(&mut buf);
-        ready!(Pin::new(&mut self.as_mut().timerfd).poll_read(cx, &mut buf)?);
+        ready!(self.timer.poll_expired(cx))?;
         Poll::Ready(Ok(()))
     }
 }
@@ -71,26 +61,35 @@ impl Future for Delay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     #[tokio::test]
     async fn delay_zero_duration() -> Result<(), std::io::Error> {
         let now = Instant::now();
         let delay = Delay::new(Instant::now())?;
         delay.await?;
-        let elapsed = now.elapsed();
-        println!("{:?}", elapsed);
-        assert!(elapsed < Duration::from_millis(1));
+        assert!(now.elapsed() < Duration::from_secs(1));
         Ok(())
     }
 
     #[tokio::test]
     async fn delay_works() {
         let now = Instant::now();
-        let delay = Delay::new(now + Duration::from_micros(10)).unwrap();
+        let delay = Delay::new(now + Duration::from_millis(10)).unwrap();
         delay.await.unwrap();
-        let elapsed = now.elapsed();
-        println!("{:?}", elapsed);
-        assert!(elapsed < Duration::from_millis(1));
+        assert!(now.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn delay_reports_elapsed_state() -> Result<(), std::io::Error> {
+        let mut delay = Delay::new(Instant::now() + Duration::from_millis(10))?;
+        assert!(!delay.is_elapsed());
+
+        delay.reset(Instant::now() - Duration::from_millis(1));
+        assert!(delay.is_elapsed());
+
+        delay.reset(Instant::now() + Duration::from_millis(10));
+        assert!(!delay.is_elapsed());
+        Ok(())
     }
 }

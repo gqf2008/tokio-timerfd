@@ -131,7 +131,7 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkgin -y install rust
+            pkg_add -I rust
           run: |
             cargo test
 

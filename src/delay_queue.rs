@@ -1,197 +1,338 @@
-use crate::{get_clock, TimerFd};
-use futures::{task, try_ready, Async, Stream};
+use crate::timer::Timer;
+use futures_core::{ready, Stream};
 use slab::Slab;
-use std::cmp::Reverse;
+use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use std::io::Error as IoError;
+use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
-use timerfd::{SetTimeFlags, TimerState};
+
+/// Identifies an entry stored in a [`DelayQueue`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Key {
+    index: usize,
+    sequence: u64,
+}
+
+struct Slot<T> {
+    sequence: u64,
+    value: Option<Box<T>>,
+}
 
 struct Entry {
-    expiration: Instant,
+    deadline: Instant,
     index: usize,
+    sequence: u64,
 }
 
 impl PartialOrd for Entry {
-    fn partial_cmp(&self, other: &Entry) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
+
 impl Ord for Entry {
-    fn cmp(&self, other: &Entry) -> std::cmp::Ordering {
-        self.expiration.cmp(&other.expiration)
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.deadline
+            .cmp(&other.deadline)
+            .then_with(|| self.sequence.cmp(&other.sequence))
     }
 }
+
 impl PartialEq for Entry {
-    fn eq(&self, other: &Entry) -> bool {
-        self.cmp(other) == std::cmp::Ordering::Equal
+    fn eq(&self, other: &Self) -> bool {
+        self.deadline == other.deadline && self.sequence == other.sequence
     }
 }
+
 impl Eq for Entry {}
 
-/// Token to a value stored in a `DelayQueue`.
-#[derive(Debug)]
-pub struct Key(usize);
-
-/// A queue of delayed elements.
+/// A queue of values that become available after their deadlines elapse.
 ///
-/// Once an element is inserted into the `DelayQueue`, it is yielded once the
-/// specified deadline has been reached.
+/// The queue owns one operating-system timer and multiplexes all entries
+/// through a min-heap, so adding many timers does not consume one native
+/// timer handle per entry.
 pub struct DelayQueue<T> {
-    timerfd: TimerFd,
-    slab: Slab<T>,
+    timer: Timer,
+    slots: Slab<Slot<T>>,
     heap: BinaryHeap<Reverse<Entry>>,
-    task: Option<task::Task>,
+    next_sequence: u64,
+    active: usize,
 }
 
 impl<T> DelayQueue<T> {
-    /// Create a new, empty, `DelayQueue`
-    ///
-    /// The queue will not allocate storage until items are inserted into it.
-    pub fn new() -> Result<DelayQueue<T>, IoError> {
-        let timerfd = TimerFd::new(get_clock())?;
-        Ok(DelayQueue {
-            timerfd,
+    /// Creates a new, empty queue.
+    pub fn new() -> io::Result<Self> {
+        Ok(Self {
+            timer: Timer::new()?,
+            slots: Slab::new(),
             heap: BinaryHeap::new(),
-            slab: Slab::new(),
-            task: None,
+            next_sequence: 0,
+            active: 0,
         })
     }
 
-    fn poll_next(&mut self) -> Result<Async<Option<Expired<T>>>, IoError> {
-        let now = Instant::now();
-        if let Some(item) = self.heap.peek() {
-            if item.0.expiration > now {
-                let duration = item.0.expiration - now;
-                self.timerfd
-                    .set_state(TimerState::Oneshot(duration), SetTimeFlags::Default);
-            } else {
-                let item = self.heap.pop().unwrap();
-                let data = self.slab.remove(item.0.index);
+    /// Inserts `value` and returns a key that can remove it before expiration.
+    pub fn insert_at(&mut self, value: T, deadline: Instant) -> Key {
+        let sequence = self.next_sequence;
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .expect("DelayQueue sequence exhausted");
 
-                if let Some(task) = &self.task {
-                    task.notify();
-                }
-
-                return Ok(Async::Ready(Some(Expired {
-                    data,
-                    deadline: item.0.expiration,
-                    key: Key(item.0.index),
-                })));
-            };
-        }
-        Ok(Async::NotReady)
-    }
-
-    /// Insert `value` into the queue set to expire at a specific instant in
-    /// time.
-    ///
-    /// This function is identical to `insert`, but takes an `Instant` instead
-    /// of a `Duration`.
-    ///
-    /// `value` is stored in the queue until `when` is reached. At which point,
-    /// `value` will be returned from [`poll`]. If `when` has already been
-    /// reached, then `value` is immediately made available to poll.
-    pub fn insert_at(&mut self, value: T, when: Instant) -> Key {
-        let idx = self.slab.insert(value);
+        let index = self.slots.insert(Slot {
+            sequence,
+            value: Some(Box::new(value)),
+        });
         self.heap.push(Reverse(Entry {
-            expiration: when,
-            index: idx,
+            deadline,
+            index,
+            sequence,
         }));
-        if let Some(task) = &self.task {
-            task.notify();
-        }
-        Key(idx)
+        self.active += 1;
+
+        Key { index, sequence }
     }
 
-    /// Insert `value` into the queue set to expire after the requested duration
-    /// elapses.
+    /// Tries to insert `value` to expire after `timeout`.
+    pub fn try_insert(&mut self, value: T, timeout: Duration) -> io::Result<Key> {
+        let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "delay exceeds the supported clock range",
+            )
+        })?;
+        Ok(self.insert_at(value, deadline))
+    }
+
+    /// Inserts `value` to expire after `timeout`.
     ///
-    /// This function is identical to `insert_at`, but takes a `Duration`
-    /// instead of an `Instant`.
+    /// # Panics
+    ///
+    /// Panics if the timeout exceeds the supported clock range.
     pub fn insert(&mut self, value: T, timeout: Duration) -> Key {
-        self.insert_at(value, Instant::now() + timeout)
+        self.try_insert(value, timeout)
+            .expect("delay exceeds the supported clock range")
     }
 
-    /// Clears the queue, removing all items.
+    /// Removes an entry if it has not expired.
+    pub fn remove(&mut self, key: Key) -> Option<T> {
+        let value = self
+            .slots
+            .get_mut(key.index)
+            .filter(|slot| slot.sequence == key.sequence)
+            .and_then(|slot| slot.value.take())
+            .map(|value| *value);
+
+        if value.is_some() {
+            self.active -= 1;
+            let removed_earliest = self.heap.peek().is_some_and(|entry| {
+                entry.0.index == key.index && entry.0.sequence == key.sequence
+            });
+            if removed_earliest {
+                self.timer.disarm();
+            }
+        }
+        value
+    }
+
+    /// Removes all entries and disarms the underlying timer.
     pub fn clear(&mut self) {
-        // TODO: should return None
         self.heap.clear();
-        self.slab.clear();
+        self.slots.clear();
+        self.active = 0;
+        self.timer.disarm();
+    }
+
+    /// Returns the number of unexpired entries.
+    pub fn len(&self) -> usize {
+        self.active
+    }
+
+    /// Returns `true` when the queue contains no unexpired entries.
+    pub fn is_empty(&self) -> bool {
+        self.active == 0
+    }
+
+    fn is_stale(&self, entry: &Entry) -> bool {
+        self.slots.get(entry.index).map_or(true, |slot| {
+            slot.sequence != entry.sequence || slot.value.is_none()
+        })
+    }
+
+    fn next_deadline(&mut self) -> Option<Instant> {
+        loop {
+            let entry = self.heap.peek().map(|entry| &entry.0)?;
+            if self.is_stale(entry) {
+                self.heap.pop();
+            } else {
+                return Some(entry.deadline);
+            }
+        }
+    }
+
+    fn pop_expired(&mut self, deadline: Instant) -> Option<Expired<T>> {
+        while let Some(entry) = self.heap.pop() {
+            let entry = entry.0;
+            if entry.deadline > deadline {
+                self.heap.push(Reverse(entry));
+                return None;
+            }
+
+            let Some(slot) = self.slots.get_mut(entry.index) else {
+                continue;
+            };
+            if slot.sequence != entry.sequence {
+                continue;
+            }
+            let Some(value) = slot.value.take() else {
+                continue;
+            };
+
+            self.active -= 1;
+            return Some(Expired {
+                value,
+                deadline: entry.deadline,
+                key: Key {
+                    index: entry.index,
+                    sequence: entry.sequence,
+                },
+            });
+        }
+        None
     }
 }
 
-/// An entry in `DelayQueue` that has expired and removed.
-#[derive(Debug)]
+/// An entry returned after its deadline has elapsed.
 pub struct Expired<T> {
-    data: T,
+    value: Box<T>,
     deadline: Instant,
     key: Key,
 }
 
 impl<T> Expired<T> {
+    /// Returns the deadline that expired.
+    pub fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
+    /// Returns the key associated with the expired entry.
+    pub fn key(&self) -> Key {
+        self.key
+    }
+
+    /// Consumes the entry and returns its value.
     pub fn into_inner(self) -> T {
-        self.data
+        *self.value
     }
 }
 
 impl<T> Stream for DelayQueue<T> {
-    type Item = Expired<T>;
-    type Error = IoError;
+    type Item = Result<Expired<T>, io::Error>;
 
-    fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
-        self.timerfd.poll_read()?;
-        self.task = Some(task::current());
-        let expired = try_ready!(self.poll_next());
-        Ok(Async::Ready(expired))
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.active, Some(self.active))
+    }
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            let Some(deadline) = self.next_deadline() else {
+                self.timer.disarm();
+                return Poll::Pending;
+            };
+
+            if Instant::now() >= deadline {
+                if let Some(expired) = self.pop_expired(deadline) {
+                    return Poll::Ready(Some(Ok(expired)));
+                }
+                continue;
+            }
+
+            self.timer.arm(deadline)?;
+            ready!(self.timer.poll_expired(cx))?;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
-    use tokio::prelude::*;
+    use futures::stream::StreamExt;
 
-    #[test]
-    fn delay_queue_insert() {
-        tokio::run(future::lazy(|| {
-            let mut queue = DelayQueue::new().unwrap();
-            queue.insert(3u32, Duration::from_micros(300));
-            queue.insert(1u32, Duration::from_micros(100));
-            queue.insert(4u32, Duration::from_micros(400));
-            queue.insert(2u32, Duration::from_micros(200));
-            let mut ctr = 1;
-            queue
-                .take(4)
-                .for_each(move |item| {
-                    assert_eq!(item.into_inner(), ctr);
-                    ctr += 1;
-                    Ok(())
-                })
-                .map_err(|_| ())
-        }))
+    #[tokio::test]
+    async fn entries_expire_in_deadline_order() {
+        let mut queue = DelayQueue::new().unwrap();
+        queue.insert(3_u32, Duration::from_millis(30));
+        queue.insert(1_u32, Duration::from_millis(10));
+        queue.insert(2_u32, Duration::from_millis(20));
+
+        for expected in 1..=3 {
+            let expired = queue.next().await.unwrap().unwrap();
+            assert_eq!(expired.into_inner(), expected);
+        }
     }
 
-    #[test]
-    fn delay_queue_insert_at() {
-        tokio::run(future::lazy(|| {
-            let mut queue = DelayQueue::new().unwrap();
-            let now = Instant::now();
-            queue.insert_at(5u32, now + Duration::from_micros(402));
-            queue.insert_at(4u32, now + Duration::from_micros(401));
-            queue.insert_at(2u32, now + Duration::from_micros(200));
-            queue.insert_at(1u32, now + Duration::from_micros(100));
-            queue.insert_at(3u32, now + Duration::from_micros(300));
-            let mut ctr = 0;
-            queue
-                .take(5)
-                .for_each(move |item| {
-                    ctr += 1;
-                    assert_eq!(item.into_inner(), ctr);
-                    Ok(())
-                })
-                .map_err(|_| ())
-        }))
+    #[tokio::test]
+    async fn removing_earliest_entry_uses_next_deadline() {
+        let mut queue = DelayQueue::new().unwrap();
+        let first = queue.insert(1_u32, Duration::from_millis(10));
+        queue.insert(2_u32, Duration::from_millis(20));
+
+        assert_eq!(queue.remove(first), Some(1));
+        let expired = queue.next().await.unwrap().unwrap();
+        assert_eq!(expired.into_inner(), 2);
+    }
+
+    #[tokio::test]
+    async fn old_key_does_not_remove_reused_slot() {
+        let mut queue = DelayQueue::new().unwrap();
+        let old = queue.insert(1_u32, Duration::from_millis(10));
+        assert_eq!(queue.remove(old), Some(1));
+
+        queue.insert(2_u32, Duration::from_millis(10));
+        assert_eq!(queue.remove(old), None);
+        assert_eq!(queue.next().await.unwrap().unwrap().into_inner(), 2);
+    }
+
+    #[tokio::test]
+    async fn equal_deadlines_are_fifo() {
+        let mut queue = DelayQueue::new().unwrap();
+        let deadline = Instant::now() + Duration::from_millis(10);
+        queue.insert_at(1_u32, deadline);
+        queue.insert_at(2_u32, deadline);
+
+        assert_eq!(queue.next().await.unwrap().unwrap().into_inner(), 1);
+        assert_eq!(queue.next().await.unwrap().unwrap().into_inner(), 2);
+    }
+
+    #[tokio::test]
+    async fn overflow_is_rejected() {
+        let mut queue = DelayQueue::new().unwrap();
+        assert!(queue.try_insert(1_u32, Duration::MAX).is_err());
+    }
+
+    #[tokio::test]
+    async fn many_entries_share_one_timer() {
+        let mut queue = DelayQueue::new().unwrap();
+        for value in 0..64_u32 {
+            queue.insert(value, Duration::from_millis(1 + u64::from(value % 4)));
+        }
+
+        let mut received = Vec::new();
+        for _ in 0..64 {
+            received.push(queue.next().await.unwrap().unwrap().into_inner());
+        }
+        received.sort_unstable();
+        assert_eq!(received, (0..64).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn clear_removes_entries() {
+        let mut queue = DelayQueue::new().unwrap();
+        queue.insert(1_u32, Duration::from_secs(1));
+        assert_eq!(queue.len(), 1);
+        queue.clear();
+        assert!(queue.is_empty());
     }
 }

@@ -86,6 +86,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn delay_reset_rearms_timer() -> Result<(), std::io::Error> {
+        let start = Instant::now();
+        let mut delay = Delay::new(start + Duration::from_secs(60))?;
+        delay.reset(start + Duration::from_millis(10));
+        delay.await?;
+        assert!(start.elapsed() < Duration::from_secs(1));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dropping_pending_delay_is_safe() -> Result<(), std::io::Error> {
+        let delay = Delay::new(Instant::now() + Duration::from_secs(60))?;
+        drop(delay);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn try_sleep_works() -> Result<(), std::io::Error> {
         crate::try_sleep(Duration::from_millis(1))?.await
     }

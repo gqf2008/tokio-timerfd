@@ -4,10 +4,10 @@ This benchmark measures end-to-end scheduling behavior, not raw syscall cost.
 
 - `delay`: absolute lateness after the requested deadline.
 - `delay-create`: time spent constructing the timer before it is armed.
-- `interval`: `(actual tick delta - requested period)`.
+- `interval`: `(actual tick delta - requested period)`. Low values do not imply accurate absolute wakeups.
 - `delay-queue`: absolute lateness for 1,000 entries multiplexed over one timer.
 - Values are microseconds. Negative values mean the callback ran early.
-- `Interval` measures jitter/drift between delivered ticks. A fixed phase offset does not appear in this metric.
+- `Interval` measures tick-to-tick period error. A fixed phase offset is not included, so this metric does not establish one-shot deadline accuracy.
 
 Run it with:
 

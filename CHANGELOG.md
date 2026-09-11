@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.3] - 2026-09-11
+
+### Changed
+
+- Clarified resolution, absolute latency, jitter, and drift semantics in the README and crate documentation.
+
 ## [0.3.2] - 2026-09-11
 
 ### Changed

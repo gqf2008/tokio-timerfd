@@ -12,9 +12,19 @@
 //!   currently fall back to millisecond granularity.
 //! * Other platforms: a Tokio timer-wheel fallback.
 //!
-//! Exact wakeup precision depends on the operating system and scheduler.
-//! These timers provide high-resolution scheduling, not hard real-time
-//! guarantees.
+//! "High resolution" describes the operating-system timer facility and the
+//! granularity it can represent; it is not a promise that a task is polled at
+//! the requested deadline. Resolution is only the timer's representable step:
+//!
+//! * Deadline error is the difference between the actual and requested
+//!   wakeup. It includes timer delivery, OS scheduling, task wakeup, and load.
+//! * Jitter is variation in that error between wakeups. Low jitter does not
+//!   imply low absolute latency.
+//! * Drift is accumulated error over repeated periods. `Interval` re-arms
+//!   against an absolute schedule to avoid unbounded drift, but it cannot
+//!   remove scheduler-induced latency.
+//!
+//! These APIs do not provide hard real-time guarantees.
 //!
 //! * [`Delay`]: a future that completes at a specified instant.
 //! * [`Interval`]: a stream that yields at fixed intervals.

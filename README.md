@@ -52,12 +52,25 @@ no effect on other platforms.
 | OpenBSD | Runtime tests in CI |
 | DragonFly BSD | Best effort until runtime coverage exists |
 
-The APIs provide higher timer resolution where the operating system supports it,
-but actual wakeup latency remains dependent on scheduling and system load. They
-do not provide hard real-time guarantees. In the current Windows test
-environment, absolute one-shot wakeups show an approximately 0.5-1ms scheduling
-floor; interval tick deltas can be tighter because they do not include a fixed
-phase offset.
+## Precision semantics
+
+"High resolution" describes the timer facility and the granularity exposed by the
+OS backend. It does not mean "wakes exactly on time" and it is not a hard
+real-time guarantee. Resolution is the size of the timer's step; accuracy is how
+close a wakeup actually is to the requested deadline.
+
+| Term | Meaning in this crate |
+| --- | --- |
+| Resolution | The finest increment the backend can represent. It is a property of the timer interface, not a bound on wakeup error. |
+| Deadline error | `actual wakeup - requested deadline` (positive means late). It includes timer delivery, OS scheduling, Tokio task wakeup, and system load. |
+| Jitter | Variation in deadline error between wakeups. Low jitter does not imply low absolute latency. |
+| Drift | Accumulated deadline error over repeated periods. `Interval` advances an absolute schedule instead of adding the period after each wakeup, preventing one delayed tick from shifting every later tick. |
+
+For example, Windows can represent sub-millisecond deadlines while one-shot
+wakeups may still occur about 0.5-1 ms late. An `Interval` can show much smaller
+tick-to-tick deltas because a fixed phase offset is present in every tick and
+cancels out of the delta. See [BENCHMARK.md](BENCHMARK.md) for methodology and
+results.
 
 ## Benchmarks
 

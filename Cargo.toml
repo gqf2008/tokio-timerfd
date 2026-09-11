@@ -1,6 +1,6 @@
 [package]
 name = "tokio-timerd"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["Alexander Polakov <plhk@sdf.org>"]
 edition = "2018"
 rust-version = "1.81"

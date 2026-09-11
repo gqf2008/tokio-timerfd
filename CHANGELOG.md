@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2] - 2026-09-11
+
+### Changed
+
+- Added timer-construction measurements to the benchmark.
+- Documented the measured 0.5-1ms absolute scheduling floor on Windows.
+
 ## [0.3.1] - 2026-09-11
 
 ### Changed

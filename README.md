@@ -54,7 +54,10 @@ no effect on other platforms.
 
 The APIs provide higher timer resolution where the operating system supports it,
 but actual wakeup latency remains dependent on scheduling and system load. They
-do not provide hard real-time guarantees.
+do not provide hard real-time guarantees. In the current Windows test
+environment, absolute one-shot wakeups show an approximately 0.5-1ms scheduling
+floor; interval tick deltas can be tighter because they do not include a fixed
+phase offset.
 
 ## Benchmarks
 

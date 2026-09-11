@@ -40,12 +40,15 @@ fn stats(mut samples: Vec<i128>) -> Stats {
     }
 }
 
-async fn measure_delay(period: Duration, iterations: u64) -> Vec<i128> {
+async fn measure_delay(period: Duration, iterations: u64) -> (Vec<i128>, Vec<i128>) {
     let mut samples = Vec::with_capacity(iterations as usize);
+    let mut setup_samples = Vec::with_capacity(iterations as usize);
 
     for _ in 0..iterations {
-        let deadline = Instant::now() + period;
+        let setup_start = Instant::now();
+        let deadline = setup_start + period;
         let delay = Delay::new(deadline).expect("failed to create OS timer");
+        setup_samples.push(setup_start.elapsed().as_nanos() as i128);
         delay.await.expect("OS timer failed");
         samples.push(
             Instant::now()
@@ -54,7 +57,7 @@ async fn measure_delay(period: Duration, iterations: u64) -> Vec<i128> {
         );
     }
 
-    samples
+    (samples, setup_samples)
 }
 
 async fn measure_interval(period: Duration, iterations: u64) -> Vec<i128> {
@@ -158,8 +161,14 @@ async fn main() {
     for period_us in periods_us {
         let period = Duration::from_micros(period_us);
 
-        let samples = measure_delay(period, iterations).await;
+        let (samples, setup_samples) = measure_delay(period, iterations).await;
         print_stats("tokio-timerd-delay", period_us, iterations, &stats(samples));
+        print_stats(
+            "tokio-timerd-delay-create",
+            period_us,
+            iterations,
+            &stats(setup_samples),
+        );
 
         let samples = measure_interval(period, iterations).await;
         print_stats(

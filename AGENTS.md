@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`tokio-timerfd` is a cross-platform Rust timer library for Tokio. `src/lib.rs` defines `TimerFd`, `sleep`, and the public backend documentation. `src/delay.rs` implements the `Delay` future, `src/interval.rs` implements the `Interval` stream, and `src/timer.rs` selects the platform backend. Linux/Android uses `timerfd`; Windows uses a high-resolution waitable timer with a standard-timer fallback; BSD/macOS uses `kqueue`; other targets fall back to Tokio timers. `src/delay_queue.rs` implements the multi-entry `DelayQueue` over one native timer. Unit tests are embedded beside each module.
+`tokio-timerd` is a cross-platform Rust timer library for Tokio. `src/lib.rs` defines `TimerFd`, `sleep`, and the public backend documentation. `src/delay.rs` implements the `Delay` future, `src/interval.rs` implements the `Interval` stream, and `src/timer.rs` selects the platform backend. Linux/Android uses `timerfd`; Windows uses a high-resolution waitable timer with a standard-timer fallback; BSD/macOS uses `kqueue`; other targets fall back to Tokio timers. `src/delay_queue.rs` implements the multi-entry `DelayQueue` over one native timer. Unit tests are embedded beside each module.
 
 ## Build, Test, and Development Commands
 

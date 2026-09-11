@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use futures::stream::StreamExt;
-use tokio_timerfd::{Delay, DelayQueue, Interval};
+use tokio_timerd::{Delay, DelayQueue, Interval};
 
 fn env_u64(name: &str, default: u64) -> u64 {
     std::env::var(name)
@@ -160,7 +160,7 @@ async fn main() {
 
         let samples = measure_delay(period, iterations).await;
         print_stats(
-            "tokio-timerfd-delay",
+            "tokio-timerd-delay",
             period_us,
             iterations,
             &stats(samples),
@@ -168,7 +168,7 @@ async fn main() {
 
         let samples = measure_interval(period, iterations).await;
         print_stats(
-            "tokio-timerfd-interval",
+            "tokio-timerd-interval",
             period_us,
             iterations,
             &stats(samples),
@@ -191,7 +191,7 @@ async fn main() {
         let period = Duration::from_micros(500);
         let samples = measure_delay_queue(period, queue_entries).await;
         print_stats(
-            "tokio-timerfd-delay-queue",
+            "tokio-timerd-delay-queue",
             500,
             queue_entries,
             &stats(samples),

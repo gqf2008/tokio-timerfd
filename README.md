@@ -1,4 +1,4 @@
-tokio-timerfd
+tokio-timerd
 =============
 
 [![CI](https://github.com/gqf2008/tokio-timerfd/actions/workflows/ci.yml/badge.svg)](https://github.com/gqf2008/tokio-timerfd/actions/workflows/ci.yml)
@@ -31,7 +31,7 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
-    tokio_timerfd::sleep(Duration::from_millis(10)).await.unwrap();
+    tokio_timerd::sleep(Duration::from_millis(10)).await.unwrap();
 }
 ```
 

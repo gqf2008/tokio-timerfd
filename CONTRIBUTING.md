@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for improving `tokio-timerfd`.
+Thanks for improving `tokio-timerd`.
 
 ## Development
 

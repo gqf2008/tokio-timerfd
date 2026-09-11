@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-09-11
+
+### Changed
+
+- Renamed the crate to `tokio-timerd` for independent crates.io distribution.
+
 ## [0.3.0] - 2026-09-11
 
 ### Added

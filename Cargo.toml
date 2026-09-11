@@ -1,12 +1,12 @@
 [package]
-name = "tokio-timerfd"
-version = "0.3.0"
+name = "tokio-timerd"
+version = "0.3.1"
 authors = ["Alexander Polakov <plhk@sdf.org>"]
 edition = "2018"
 rust-version = "1.81"
 description = "OS-backed timers for Tokio"
 license = "MIT"
-documentation = "https://docs.rs/tokio-timerfd"
+documentation = "https://docs.rs/tokio-timerd"
 repository = "https://github.com/gqf2008/tokio-timerfd"
 homepage = "https://github.com/gqf2008/tokio-timerfd"
 readme = "README.md"

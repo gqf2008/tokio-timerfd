@@ -159,12 +159,7 @@ async fn main() {
         let period = Duration::from_micros(period_us);
 
         let samples = measure_delay(period, iterations).await;
-        print_stats(
-            "tokio-timerd-delay",
-            period_us,
-            iterations,
-            &stats(samples),
-        );
+        print_stats("tokio-timerd-delay", period_us, iterations, &stats(samples));
 
         let samples = measure_interval(period, iterations).await;
         print_stats(
